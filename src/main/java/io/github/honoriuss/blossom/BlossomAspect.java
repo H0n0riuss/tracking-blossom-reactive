@@ -54,14 +54,10 @@ class BlossomAspect<T> {
     }
 
     @Around("@annotation(track)") //TODO Flux needed?
-    public Mono<Object> trackInputAndOutput(ProceedingJoinPoint joinPoint, Track track) throws Throwable {
-        return handleReactiveTracking(joinPoint, track);
-    }
-
-    protected Mono<Object> handleReactiveTracking(ProceedingJoinPoint joinPoint, Track track) throws Throwable {
+    public Mono<?> trackInputAndOutput(ProceedingJoinPoint joinPoint, Track track) throws Throwable {
         var result = joinPoint.proceed();
-        if (result instanceof Mono<?>) {
-            return ((Mono<?>) result).flatMap(resValue -> createTracking(joinPoint, track, resValue));
+        if (result instanceof Mono<?> mono) {
+            return mono.doOnSuccess(resValue -> createTracking(joinPoint, track, resValue));
         /*} else if (result instanceof Flux) {
             return ((Flux<Object>) result)
                     .doOnNext(resValue -> createTracking(joinPoint, track, resValue));*/
@@ -69,15 +65,17 @@ class BlossomAspect<T> {
         throw new IllegalArgumentException("Cant handle reactive stack...");
     }
 
-    private Mono<Object> createTracking(ProceedingJoinPoint joinPoint, Track track, Object result) {
-        return createTrackingObject(joinPoint, track.parameterNames(), track.optKey(), track.optArg(), track.returnName(), result).flatMap(trackingObj -> {
-            var method = ((MethodSignature) joinPoint.getSignature()).getMethod();
-            if (method.isAnnotationPresent(AdditionalTrackingInfo.class)) {
-                return trackingHandler.handleTracking(trackingObj, method.getAnnotation(AdditionalTrackingInfo.class)).thenReturn(result);
-            } else {
-                return trackingHandler.handleTracking(trackingObj).thenReturn(result);
-            }
-        });
+    private void createTracking(ProceedingJoinPoint joinPoint, Track track, Object result) {
+        createTrackingObject(joinPoint, track.parameterNames(), track.optKey(), track.optArg(), track.returnName(), result)
+                .flatMap(trackingObj -> {
+                    var method = ((MethodSignature) joinPoint.getSignature()).getMethod();
+                    if (method.isAnnotationPresent(AdditionalTrackingInfo.class)) {
+                        return trackingHandler.handleTracking(trackingObj, method.getAnnotation(AdditionalTrackingInfo.class)).thenReturn(result);
+                    } else {
+                        return trackingHandler.handleTracking(trackingObj).thenReturn(result);
+                    }
+                })
+                .subscribe();
     }
 
     protected Mono<Void> addOptionalArgument(List<Object> args, List<String> parameterNames, Object optArg, String optKey) {
